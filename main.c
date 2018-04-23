@@ -19,6 +19,7 @@ typedef struct m_node {
 	double y;
 	int conn_count; /* number of connected nodes */
 	struct m_node **connected_nodes; /* array of pointers to connected nodes */
+	int *order_nodes;
 	double *dists;  /* array of distances to connected nodes */
 } node;
 
@@ -202,6 +203,10 @@ void load_edges(graph *g, int neg_space) {
 	fclose(fp);
 }
 
+int comp_dists(const void *a, const void *b) {
+	double dist_a
+}
+
 /* calculate distances in graph */
 void load_dists(graph *g) {
 	int i, j;
@@ -209,22 +214,30 @@ void load_dists(graph *g) {
 	double n_x, n_y;
 	node **n_conn;
 	double *n_dists;
+	int *n_order;
 	/* loop over nodes in graph */
 	for(i=0; i<g->size; i++) {
 		n_size = g->node_list[i]->conn_count;
 		n_x = g->node_list[i]->x;
 		n_y = g->node_list[i]->y;
 		n_conn = g->node_list[i]->connected_nodes;
-		/* malloc the distance array */
+		/* malloc the distance arrays */
 		n_dists = malloc(sizeof(double) * n_size);
+		n_order = malloc(sizeof(int) * n_size);
 		/* loop over connected nodes */
 		for(j=0; j<n_size; j++) {
 			/* store Euclidian distance */
 			n_dists[j] = sqrt(pow(n_x-(n_conn[j]->x), 2.0) + pow(n_y-(n_conn[j]->y), 2.0));
+			n_order[j] = j;
 		}
+		/* sort the distances */
+		qsort(n_order, n_size, sizeof(int), &comp_dists);
+		/* place pointers into node */
 		g->node_list[i]->dists = n_dists;
+		g->node_list[i]->order_nodes = n_order;
+
 	}
-	/* sort the distances */
+
 }
 
 void greedy_path(graph *g, int start, int end) {

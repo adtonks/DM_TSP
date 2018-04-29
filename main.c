@@ -9,8 +9,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <float.h>
 
 /* below graph structs and functions based on Adam's submission for POSIX midterm assignment */
+
+typedef struct m_conn_node {
+	struct m_node *node;
+	double dist;
+} conn_node;
 
 typedef struct m_node {
 	int ID; /* ID of node */
@@ -18,20 +24,22 @@ typedef struct m_node {
 	double x;
 	double y;
 	int conn_count; /* number of connected nodes */
-	struct m_node **connected_nodes; /* array of pointers to connected nodes */
-	int *order_nodes;
-	double *dists;  /* array of distances to connected nodes */
+	conn_node *connected_nodes; /* array of conn_nodes structs */
+	double* min_dist;
+	int *pred; /* predecessor node */
 } node;
 
 typedef struct m_graph {
 	int size;
 	node **node_list;
+	int *visited;
 } graph;
 
 graph *create_new_graph() {
 	graph *g = malloc(sizeof(graph));
 	g->size = 0;
 	g->node_list = NULL;
+	g->visited = NULL;
 	return(g);
 }
 
@@ -45,10 +53,10 @@ node *create_node(graph *g, int ID, double x, double y) {
 	/* initialize unknown node components */
 	node_ptr->conn_count = 0;
 	node_ptr->connected_nodes = NULL;
-	node_ptr->dists = NULL;
 	/* put pointer in node_list */
 	g->node_list = realloc(g->node_list, sizeof(node *)*(g->size+1));
 	g->node_list[g->size] = node_ptr;
+	g->visited = realloc(g->visited, sizeof(int)*(g->size+1));
 	/* increment graph size */
 	g->size++;
 	return(node_ptr);
@@ -58,8 +66,8 @@ void create_edge(graph *g, int ID1, int ID2) {
 	node* node_ptr = g->node_list[ID1];
 	/* input node pointer into adjacency lists */
 	node_ptr->connected_nodes = realloc(node_ptr->connected_nodes,
-			sizeof(node *)*(node_ptr->conn_count+1));
-	node_ptr->connected_nodes[node_ptr->conn_count] = g->node_list[ID2];
+			sizeof(conn_node)*(node_ptr->conn_count+1));
+	node_ptr->connected_nodes[node_ptr->conn_count].node = g->node_list[ID2];
 	node_ptr->conn_count++;
 	return;
 }
@@ -70,8 +78,7 @@ void delete_graph(graph *g) {
 		return;
 	for(i=0; i<g->size; i++) {
 		/* free components of the node */
-		free(g->node_list[i]->connected_nodes); /* free array of connected nodes */
-		free(g->node_list[i]->dists); /* free array of distances */
+		free(g->node_list[i]->connected_nodes); /* free array of conn_node structs */
 		/* free the node */
 		free(g->node_list[i]);
 	}
@@ -101,12 +108,7 @@ void print_graph(graph *g) {
 		/* connected nodes */
 		printf(" Connected nodes: ");
 		for(j=0; j<node_ptr->conn_count; j++) {
-			printf("%d ", node_ptr->connected_nodes[j]->ID);
-		}
-		printf("\n");
-		printf(" Distances: ");
-		for(j=0; j<node_ptr->conn_count; j++) {
-			printf("%f ", node_ptr->dists[j]);
+			printf("\n Node: %d; Dist: %f", node_ptr->connected_nodes[j].node->ID, node_ptr->connected_nodes[j].dist);
 		}
 		printf("\n");
 		printf("|______________________________________|\n");
@@ -204,7 +206,17 @@ void load_edges(graph *g, int neg_space) {
 }
 
 int comp_dists(const void *a, const void *b) {
-	double dist_a
+	double dist_a = (*(const conn_node *) a).dist;
+	double dist_b = (*(const conn_node *) b).dist;
+	if(dist_a < dist_b) {
+		printf("%f less than %f\n", dist_a, dist_b);
+		return(-1);
+	} else if(dist_a > dist_b) {
+		printf("%f greater than %f\n", dist_a, dist_b);
+		return(1);
+	} else {
+		return(0);
+	}
 }
 
 /* calculate distances in graph */
@@ -212,36 +224,116 @@ void load_dists(graph *g) {
 	int i, j;
 	int n_size;
 	double n_x, n_y;
-	node **n_conn;
+	conn_node *n_conn;
 	double *n_dists;
-	int *n_order;
 	/* loop over nodes in graph */
 	for(i=0; i<g->size; i++) {
 		n_size = g->node_list[i]->conn_count;
 		n_x = g->node_list[i]->x;
 		n_y = g->node_list[i]->y;
 		n_conn = g->node_list[i]->connected_nodes;
-		/* malloc the distance arrays */
-		n_dists = malloc(sizeof(double) * n_size);
-		n_order = malloc(sizeof(int) * n_size);
 		/* loop over connected nodes */
 		for(j=0; j<n_size; j++) {
 			/* store Euclidian distance */
-			n_dists[j] = sqrt(pow(n_x-(n_conn[j]->x), 2.0) + pow(n_y-(n_conn[j]->y), 2.0));
-			n_order[j] = j;
+			n_conn[j].dist = sqrt(pow(n_x-(n_conn[j].node->x), 2.0) + pow(n_y-(n_conn[j].node->y), 2.0));
+			printf("Old %f\n", n_conn[j].dist);
 		}
 		/* sort the distances */
-		qsort(n_order, n_size, sizeof(int), &comp_dists);
-		/* place pointers into node */
-		g->node_list[i]->dists = n_dists;
-		g->node_list[i]->order_nodes = n_order;
-
+		qsort(n_conn, n_size, sizeof(*n_conn), &comp_dists);
+		for(j=0; j<n_size; j++) {
+			printf("New %f\n", n_conn[j].dist);
+		}
 	}
 
 }
 
-void greedy_path(graph *g, int start, int end) {
+void dijk_init(graph *g, int node_start) {
+	int i;
+	g->node_list[node_start]->min_dist = malloc(sizeof(double) * g->size);
+	g->node_list[node_start]->pred = malloc(sizeof(int) * g->size);
+	for(i=0; i<g->size; i++) {
+		g->node_list[node_start]->min_dist[i] = DBL_MAX;
+		g->node_list[node_start]->pred[i] = node_start;
+	}
+	for(i=0; i<g->size; i++)
+		g->visited[i] = 0;
+	return;
+}
+
+void dijk(graph *g, int node_start) {
+	int i, j;
+	double *min_dist;
+	int *pred;
+	int *visited;
+	int node_curr, count_adj;
+	int node_adj;
+	double node_curr_dist, node_adj_dist;
+
+	dijk_init(g, node_start);
+	min_dist = g->node_list[node_start]->min_dist;
+	pred = g->node_list[node_start]->pred;
+	visited = g->visited;
+
+	/* ensure that node_start is first to be visited */
+	min_dist[node_start] = 0;
+	for(i=0; i<g->size; i++) {
+		node_curr_dist = DBL_MAX;
+		/* find the unvisted node with lowest interim distance */
+		for(j=0; j<g->size; j++) {
+			if((min_dist[j] <= node_curr_dist) && (visited[j] == 0)) {
+				node_curr = j;
+				node_curr_dist = min_dist[j];
+			}
+		}
+		/* check if a better path exists through this node */
+		visited[node_curr] = 1;
+		count_adj = g->node_list[node_curr]->conn_count;
+		for(j=0; j<count_adj; j++) {
+			node_adj = g->node_list[node_curr]->connected_nodes[j].node->ID;
+			node_adj_dist = g->node_list[node_curr]->connected_nodes[j].dist;
+			if(visited[node_adj] == 0) {
+				/* assign new predecessor and distance if better path found */
+				if((node_curr_dist+node_adj_dist) < min_dist[node_adj]) {
+					min_dist[node_adj] = node_curr_dist + node_adj_dist;
+					pred[node_adj] = node_curr;
+				}
+			}
+		}
+	}
+}
+
+double greedy_path(graph *g, int start) {
+	int i, j;
+	double dist_cum, node_next_dist;
+	int node_curr, node_next;
 	/* find the shortest path using a greedy algorithm */
+	/* convert into fully connected graph */
+	for(i=0; i<g->size; i++) {
+		dijk(g, i);
+		printf("Running Dijkstra's algorithm on node %d\n", i);
+	}
+	for(i=0; i<g->size; i++)
+		g->visited[i] = 0;
+	/* traverse the graph */
+	node_curr = start;
+	g->visited[node_curr] = 1;
+	dist_cum = 0;
+	for(i=1; i<g->size; i++) {
+		node_next_dist = DBL_MAX;
+		for(j=0; j<g->size; j++) {
+			if((g->node_list[node_curr]->min_dist[j] <= node_next_dist) && (g->visited[j] == 0)) {
+				node_next = j;
+				node_next_dist = g->node_list[node_curr]->min_dist[j];
+			}
+		}
+		g->visited[node_next] = 1;
+		dist_cum += node_next_dist;
+		printf("Visit node %d with distance %f\n", node_next, node_next_dist);
+		node_curr = node_next;
+	}
+	/* return to start */
+	dist_cum += g->node_list[node_curr]->min_dist[start];
+	return(dist_cum);
 }
 
 int main(int argc, char* argv[]) {
@@ -250,6 +342,7 @@ int main(int argc, char* argv[]) {
 	load_edges(g, 0);
 	load_dists(g);
 	print_graph(g);
+	printf("The greedy algorithm finds a walk of length %f\n", greedy_path(g, 0));
 	delete_graph(g);
 	return(0);
 }
